@@ -28,6 +28,8 @@ zips_by_district <- read_csv("https://github.com/Cook-County-Department-of-Publi
 
 ```{r expected_data}
 
+#pull all visit counts to determine how complete most recent CC and DD data is
+
 #pull last 30 days visit counts for sub-Cook residents
 total_counts_api <- "https://essence.syndromicsurveillance.org/nssp_essence/api/timeSeries?geography=il_cook&percentParam=noPercent&geographySystem=region&datasource=va_er&detector=probrepswitch&timeResolution=daily&hasBeenE=1&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TimeSeries&startDate=07Aug20&endDate=05Nov20&stratVal=&multiStratVal=&graphOnly=true&numSeries=0&graphOptions=multipleSmall&seriesPerYear=false&startMonth=January&nonZeroComposite=false"
 
@@ -61,16 +63,17 @@ yesterday_dd_count <- pull(total_dd[30, 2]) / avg_dd_count
 
 ```{r ed_plot}
 
-#hri v2 syndrome looks slightly more sensitive - follow up to validate
-heat_ed_api <- "https://essence.syndromicsurveillance.org/nssp_essence/api/timeSeries?endDate=15Jun2022&geography=il_cook&percentParam=ccddCategory&datasource=va_er&startDate=17Mar2022&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TimeSeries&ccddCategory=heat%20related%20illness%20v2&geographySystem=region&detector=probrepswitch&timeResolution=daily&hasBeenE=1"
+#hri v2 syndrome looks slightly more sensitive - follow up to validate; pull from table builder to get counts on hover
+heat_ed_api <- "https://essence.syndromicsurveillance.org/nssp_essence/api/tableBuilder?endDate=24Jun2022&geography=il_cook&percentParam=ccddCategory&datasource=va_er&startDate=26Mar2022&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TableBuilder&ccddCategory=heat%20related%20illness%20v2&geographySystem=region&detector=probrepswitch&timeResolution=daily&hasBeenE=1&rowFields=geographyregion&columnField=timeResolution" %>%
+  essence_change_api_date(start = essence_api_date(Sys.Date() - 90), end = essence_api_date(Sys.Date()))
 
-ord_temp_api <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/timeSeries?percentParam=noPercent&endDate=",
-               essence_api_date(Sys.Date()),"&userId=2541&weatherFactor=maxtemp&datasource=va_weather_aggr&stationAggregateFunc=avg&timeResolution=daily&aqtTarget=TimeSeries&detector=probrepswitch&timeAggregateFunc=avg&startDate=",
-               essence_api_date(Sys.Date() - 90),"&stationID=lot-ord") 
+#max temps from O'hare
+ord_temp_api <- "https://essence.syndromicsurveillance.org/nssp_essence/api/timeSeries?percentParam=noPercent&endDate=24Jun2022&userId=2541&weatherFactor=maxtemp&datasource=va_weather_aggr&stationAggregateFunc=avg&timeResolution=daily&aqtTarget=TimeSeries&detector=probrepswitch&timeAggregateFunc=avg&startDate=26Mar2022&stationID=lot-ord" %>%
+  essence_change_api_date(start = essence_api_date(Sys.Date() - 90), end = essence_api_date(Sys.Date()))
 
-heat_details_api <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/dataDetails/csv?geography=il_cook&percentParam=ccddCategory&datasource=va_er&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TimeSeries&ccddCategory=heat%20related%20illness%20v2&geographySystem=region&detector=probrepswitch&timeResolution=daily&hasBeenE=1&startDate=", essence_api_date(Sys.Date() - 90), "&endDate=", essence_api_date(Sys.Date()))
-
-heat_percent <- nssp_get_time_series(heat_ed_api, startDate = essence_api_date(Sys.Date() - 90), endDate = essence_api_date(Sys.Date()))
+heat_percent <- nssp_get_table(heat_ed_api) %>%
+  mutate(date = as.Date(timeResolution)) %>%
+  select(date, count, numerator)
 
 temps <- nssp_get_table(ord_temp_api) %>%
   mutate(date = as.Date(date),
@@ -80,7 +83,7 @@ ed_plot_data <- heat_percent %>%
   left_join(select(temps, date, max_temp))
 
 plot_ly(data = ed_plot_data, x = ~date) %>%
-  add_lines(y = ~count, yaxis = "y1", name = "% ED Vists for HRI") %>%
+  add_lines(y = ~count, yaxis = "y1", name = "% ED Vists for HRI", text = ~paste0("Percent: ", round(count,1), "%; Count: ", numerator), hoverinfo = 'x+text') %>%
   add_lines(y = ~max_temp, yaxis = "y2", name = "ORD Max Temp") %>%
   layout(yaxis = list(title = "% ED Visits", showgrid = F),
          yaxis2 = list(overlaying = "y", side = "right", title = "Max Temp, Chicago ORD", showgrid = F),
@@ -95,10 +98,8 @@ plot_ly(data = ed_plot_data, x = ~date) %>%
 
 ```{r ed_age}
 
-heat_age_api <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/tableBuilder/?endDate=", 
-                       essence_api_date(Sys.Date()), "&geography=il_cook&percentParam=ccddCategory&datasource=va_er&startDate=",
-                       essence_api_date(Sys.Date() - 60),
-                       "&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TableBuilder&ccddCategory=heat%20related%20illness%20v2&geographySystem=region&detector=probrepswitch&timeResolution=daily&hasBeenE=1&rowFields=age&columnField=timeResolution")
+heat_age_api <- "https://essence.syndromicsurveillance.org/nssp_essence/api/tableBuilder/?endDate=24Jun2022&geography=il_cook&percentParam=ccddCategory&datasource=va_er&startDate=26Mar2022&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TableBuilder&ccddCategory=heat%20related%20illness%20v2&geographySystem=region&detector=probrepswitch&timeResolution=daily&hasBeenE=1&rowFields=age&columnField=timeResolution" %>%
+  essence_change_api_date(start = essence_api_date(Sys.Date() - 60), end = essence_api_date(Sys.Date()))
 
 heat_age <- nssp_get_table(heat_age_api) %>%
   filter(age != "Unknown")
@@ -107,7 +108,8 @@ heat_age %>%
   mutate(age = factor(age),
          count = round(count, 2)) %>%
   group_by(age) %>%
-  do(p=plot_ly(., x = ~timeResolution, y = ~count, color = ~age, type = "bar", colors = viridis::viridis(5))) %>%
+  do(p=plot_ly(., x = ~timeResolution, y = ~count, color = ~age, type = "bar", colors = viridis::viridis(5), 
+               text = ~paste0("Percent: ", round(count,1), "%; Count: ", numerator), hoverinfo = 'x+text')) %>%
   subplot(nrows = 2, shareX = TRUE, shareY = TRUE) %>%
   layout(xaxis = list(title = ""),
          xaxis2 = list(title = ""),
@@ -124,10 +126,8 @@ heat_age %>%
 
 ```{r ed_race}
 
-heat_race_api <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/tableBuilder/?endDate=", 
-                       essence_api_date(Sys.Date()), "&geography=il_cook&percentParam=ccddCategory&datasource=va_er&startDate=",
-                       essence_api_date(Sys.Date() - 60),
-                       "&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TableBuilder&ccddCategory=heat%20related%20illness%20v2&geographySystem=region&detector=probrepswitch&timeResolution=daily&hasBeenE=1&rowFields=cRaceEthBroad&columnField=timeResolution")
+heat_race_api <- "https://essence.syndromicsurveillance.org/nssp_essence/api/tableBuilder/?endDate=24Jun2022&geography=il_cook&percentParam=ccddCategory&datasource=va_er&startDate=26Mar2022&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TableBuilder&ccddCategory=heat%20related%20illness%20v2&geographySystem=region&detector=probrepswitch&timeResolution=daily&hasBeenE=1&rowFields=cRaceEthBroad&columnField=timeResolution" %>%
+  essence_change_api_date(start = essence_api_date(Sys.Date() - 60), end = essence_api_date(Sys.Date()))
 
 heat_race <- nssp_get_table(heat_race_api) %>%
   mutate(new_race = case_when(grepl("Latino", cRaceEthBroad) ~ "Hispanic/Latino",
@@ -144,7 +144,8 @@ heat_race <- nssp_get_table(heat_race_api) %>%
 heat_race %>%
   mutate(new_race = factor(new_race)) %>%
   group_by(new_race) %>%
-  do(p=plot_ly(., x = ~timeResolution, y = ~percent, color = ~new_race, type = "bar", colors = viridis::viridis(5))) %>%
+  do(p=plot_ly(., x = ~timeResolution, y = ~percent, color = ~new_race, type = "bar", colors = viridis::viridis(5),
+     text = ~paste0("Percent: ", percent, "%; Count: ", new_num), hoverinfo = 'x+text')) %>%
   subplot(nrows = 2, shareX = TRUE, shareY = TRUE) %>%
   layout(xaxis = list(title = ""),
          xaxis2 = list(title = ""),
@@ -161,9 +162,8 @@ heat_race %>%
 
 ```{r ed_district}
 
-heat_zip_api <- paste0("https://essence.syndromicsurveillance.org/nssp_essence/api/tableBuilder?endDate=",
-essence_api_date(Sys.Date()), "&geography=60004,60005,60007,60008,60010,60016,60018,60022,60025,60026,60029,60043,60053,60056,60062,60067,60068,60070,60074,60090,60091,60093,60107,60120,60169,60173,60192,60193,60194,60195,60712,60714,60006,60009,60017,60019,60038,60055,60065,60078,60082,60094,60095,60159,60168,60179,60196,60011,60409,60411,60419,60422,60425,60426,60428,60429,60430,60438,60443,60445,60452,60461,60469,60471,60472,60473,60475,60476,60477,60478,60487,60827,60412,60406,60415,60439,60453,60455,60456,60457,60458,60462,60463,60464,60465,60467,60480,60482,60501,60803,60805,60454,60499,60104,60130,60131,60141,60153,60154,60155,60160,60162,60163,60164,60165,60171,60176,60305,60402,60513,60525,60526,60534,60546,60558,60706,60707,60804,60161&percentParam=ccddCategory&datasource=va_er&startDate=",
-essence_api_date(Sys.Date() - 60), "&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TableBuilder&ccddCategory=heat%20related%20illness%20v2&geographySystem=zipcode&detector=probrepswitch&timeResolution=daily&hasBeenE=1&rowFields=timeResolution&columnField=geographyzipcode")
+heat_zip_api <- "https://essence.syndromicsurveillance.org/nssp_essence/api/tableBuilder?endDate=24Jun2022&geography=60004,60005,60007,60008,60010,60016,60018,60022,60025,60026,60029,60043,60053,60056,60062,60067,60068,60070,60074,60090,60091,60093,60107,60120,60169,60173,60192,60193,60194,60195,60712,60714,60006,60009,60017,60019,60038,60055,60065,60078,60082,60094,60095,60159,60168,60179,60196,60011,60409,60411,60419,60422,60425,60426,60428,60429,60430,60438,60443,60445,60452,60461,60469,60471,60472,60473,60475,60476,60477,60478,60487,60827,60412,60406,60415,60439,60453,60455,60456,60457,60458,60462,60463,60464,60465,60467,60480,60482,60501,60803,60805,60454,60499,60104,60130,60131,60141,60153,60154,60155,60160,60162,60163,60164,60165,60171,60176,60305,60402,60513,60525,60526,60534,60546,60558,60706,60707,60804,60161&percentParam=ccddCategory&datasource=va_er&startDate=26Mar2022&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TableBuilder&ccddCategory=heat%20related%20illness%20v2&geographySystem=zipcode&detector=probrepswitch&timeResolution=daily&hasBeenE=1&rowFields=timeResolution&columnField=geographyzipcode" %>%
+  essence_change_api_date(start = essence_api_date(Sys.Date() - 60), end = essence_api_date(Sys.Date()))
 
 heat_district <- nssp_get_table(heat_zip_api) %>%
   left_join(select(zips_by_district, zip_code, district), by = c("geographyzipcode" = "zip_code")) %>%
@@ -176,7 +176,8 @@ heat_district <- nssp_get_table(heat_zip_api) %>%
 heat_district %>%
   mutate(district = factor(district, ordered = T, levels = c("North", "West", "Southwest", "South"))) %>%
   group_by(district) %>%
-  do(p=plot_ly(., x = ~timeResolution, y = ~percent, color = ~district, type = "bar")) %>%
+  do(p=plot_ly(., x = ~timeResolution, y = ~percent, color = ~district, type = "bar",
+     text = ~paste0("Percent: ", percent, "%; Count: ", new_num), hoverinfo = 'x+text')) %>%
   subplot(nrows = 2, shareX = TRUE, shareY = TRUE) %>%
   layout(xaxis = list(title = ""),
          xaxis2 = list(title = ""),
