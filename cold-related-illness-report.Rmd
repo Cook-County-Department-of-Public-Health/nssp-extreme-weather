@@ -1,0 +1,272 @@
+---
+title:
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.width = 10)
+
+library(tidyverse)
+library(jsonlite)
+library(keyring)
+library(plotly)
+library(DT)
+library(lubridate)
+
+#Supporting functions
+devtools::source_url("https://github.com/Cook-County-Department-of-Public-Health/ccdph-functions/blob/master/essence-api-functions.R?raw=TRUE")
+
+#Supporting data set
+zips_by_district <- read_csv("https://github.com/Cook-County-Department-of-Public-Health/ccdph-data-sets/blob/main/cook-county-zip-codes.csv?raw=TRUE") %>%
+  select(zip_code, district) %>%
+  mutate(zip_code = as.character(zip_code))
+
+```
+
+## Cold-Related Illness - Syndromic Surveillance Report
+
+### Generated `r Sys.Date()`
+
+```{r expected_data}
+
+#pull all visit counts to determine how complete most recent CC and DD data is
+
+#pull last 30 days visit counts for sub-Cook residents
+total_counts_api <- "https://essence.syndromicsurveillance.org/nssp_essence/api/timeSeries?geography=il_cook&percentParam=noPercent&geographySystem=region&datasource=va_er&detector=probrepswitch&timeResolution=daily&hasBeenE=1&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TimeSeries&startDate=07Aug20&endDate=05Nov20&stratVal=&multiStratVal=&graphOnly=true&numSeries=0&graphOptions=multipleSmall&seriesPerYear=false&startMonth=January&nonZeroComposite=false"
+
+total_counts <- nssp_get_time_series(total_counts_api, startDate = essence_api_date(Sys.Date() - 30), endDate = essence_api_date(Sys.Date()))
+
+avg_total_count <- mean(pull(total_counts[1:29, 2]))
+
+today_count <- tail(total_counts$count, 1) / avg_total_count
+
+yesterday_count <- pull(total_counts[30, 2]) / avg_total_count
+
+#pull last 30 days DD available for sub-Cook residents
+total_dd_api <- "https://essence.syndromicsurveillance.org/nssp_essence/api/timeSeries?endDate=15Jun2022&geography=il_cook&percentParam=noPercent&datasource=va_er&startDate=17Mar2022&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TimeSeries&ddAvailable=1&geographySystem=region&detector=probrepswitch&timeResolution=daily&hasBeenE=1"
+
+total_dd <- nssp_get_time_series(total_dd_api, startDate = essence_api_date(Sys.Date() - 40), endDate = essence_api_date(Sys.Date()))
+
+avg_dd_count <- mean(pull(total_dd[1:29, 2]))
+
+today_dd_count <- tail(total_dd$count, 1) / avg_dd_count
+
+yesterday_dd_count <- pull(total_dd[30, 2]) / avg_dd_count
+
+
+```
+
+*CCDPH uses the CSTE Working Group Cold-Related Illness (CRI) syndrome, version 1, for CRI surveillance. The syndrome uses both chief complaint and discharge diagnosis search terms related to exposure, frostbite, and hypothermia. We have received `r scales::percent(today_count)` of today's expected chief complaint data and `r scales::percent(ifelse(yesterday_count > 1, 1, yesterday_count))` of yesterday's expected chief complaint data. We have received `r scales::percent(today_dd_count)` of today's expected discharge diagnosis data and `r scales::percent(ifelse(yesterday_dd_count > 1, 1, yesterday_dd_count))` of yesterday's expected discharge diagnosis data. Graphs display the percent of ED visits for CRI by default, to account for changes in health-care seeking behavior and unstable data flows; however, visit counts are available in hover text.*
+
+***
+
+### % ED Visits for Cold-Related Illness, Suburban Cook Residents
+
+```{r ed_plot}
+
+#cri v1 syndrom
+cold_ed_api <- "https://essence.syndromicsurveillance.org/nssp_essence/api/tableBuilder?endDate=24Jun2022&geography=il_cook&percentParam=ccddCategory&datasource=va_er&startDate=26Mar2022&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TableBuilder&ccddCategory=cold%20related%20illness%20v1&geographySystem=region&detector=probrepswitch&timeResolution=daily&hasBeenE=1&rowFields=geographyregion&columnField=timeResolution" %>%
+  essence_change_api_date(start = essence_api_date(Sys.Date() - 90), end = essence_api_date(Sys.Date()))
+
+#min temps from O'hare
+ord_temp_api <- "https://essence.syndromicsurveillance.org/nssp_essence/api/timeSeries?percentParam=noPercent&endDate=24Jun2022&userId=2541&weatherFactor=mintemp&datasource=va_weather_aggr&stationAggregateFunc=min&timeResolution=daily&aqtTarget=TimeSeries&detector=probrepswitch&timeAggregateFunc=min&startDate=26Mar2022&stationID=lot-ord" %>%
+  essence_change_api_date(start = essence_api_date(Sys.Date() - 90), end = essence_api_date(Sys.Date()))
+
+cold_percent <- nssp_get_table(cold_ed_api) %>%
+  mutate(date = as.Date(timeResolution)) %>%
+  select(date, count, numerator)
+
+temps <- nssp_get_table(ord_temp_api) %>%
+  mutate(date = as.Date(date),
+         min_temp = ifelse(count == 0, NA, count))
+
+ed_plot_data <- cold_percent %>%
+  left_join(select(temps, date, min_temp))
+
+# plot_ly(data = ed_plot_data, x = ~date) %>%
+#   add_lines(y = ~count, yaxis = "y1", name = "% ED Vists for CRI", text = ~paste0("Percent: ", round(count,1), "%; Count: ", numerator), hoverinfo = 'x+text') %>%
+#   add_lines(y = ~min_temp, yaxis = "y2", name = "ORD Min Temp") %>%
+#   layout(yaxis = list(title = "% ED Visits", showgrid = F),
+#          yaxis2 = list(overlaying = "y", side = "right", title = "Min Temp, Chicago ORD", showgrid = F),
+#          xaxis = list (showgrid = F, title = "Date"),
+#          title = "% ED Visits for Cold-Releated Illness and Min Temperature")
+
+ed_plot_list <- list()
+ed_plot_list[[1]] <- plot_ly(data = ed_plot_data, x = ~date) %>%
+  add_bars(y = ~count, name = "% ED CRI Visits",
+           text = ~paste0("Percent: ", round(count,1), "%; Count: ", numerator), hoverinfo = 'x+text', textposition = "none")
+ed_plot_list[[2]] <- plot_ly(data = ed_plot_data, x = ~date) %>%
+  add_lines(y = ~min_temp, name = "Min Temp, Chicago ORD") 
+
+subplot(ed_plot_list, nrows = 2, shareX = TRUE, shareY = FALSE) %>%
+  layout(xaxis = list(title = "Date"),
+         yaxis = list(title = "% ED Visits", showgrid = F),
+         yaxis2 = list(title = "Degrees F", showgrid = F)
+         )
+
+```
+
+***
+
+### Percent ED Visits by Age
+
+```{r ed_age}
+
+cold_age_api <- "https://essence.syndromicsurveillance.org/nssp_essence/api/tableBuilder/?endDate=24Jun2022&geography=il_cook&percentParam=ccddCategory&datasource=va_er&startDate=26Mar2022&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TableBuilder&ccddCategory=cold%20related%20illness%20v1&geographySystem=region&detector=probrepswitch&timeResolution=daily&hasBeenE=1&rowFields=age&columnField=timeResolution" %>%
+  essence_change_api_date(start = essence_api_date(Sys.Date() - 60), end = essence_api_date(Sys.Date()))
+
+cold_age <- nssp_get_table(cold_age_api) %>%
+  filter(age != "Unknown") %>%
+  mutate(new_age = ifelse(age %in% c("00-04", "05-17"), "00-17", age)) %>%
+  group_by(timeResolution, new_age) %>%
+  summarize(numerator = sum(numerator),
+            denominator = sum(denominator),
+            count = numerator / denominator * 100) %>%
+  ungroup()
+
+cold_age %>%
+  mutate(new_age = factor(new_age),
+         count = round(count, 2)) %>%
+  group_by(new_age) %>%
+  do(p=plot_ly(., x = ~timeResolution, y = ~count, color = ~new_age, type = "bar", colors = viridis::viridis(5), 
+               text = ~paste0("Percent: ", round(count,1), "%; Count: ", numerator), hoverinfo = 'x+text')) %>%
+  subplot(nrows = 2, shareX = TRUE, shareY = TRUE) %>%
+  layout(xaxis = list(title = ""),
+         xaxis2 = list(title = ""),
+         xaxis3 = list(title = ""),
+         yaxis = list(title = "% ED Visits"),
+         yaxis2 = list(title = "% ED Visits"),
+         title = "")
+
+# cold_age %>%
+#   mutate(age = factor(age),
+#          count = round(count, 2)) %>%
+#   group_by(age) %>%
+#   do(p=plot_ly(., x = ~timeResolution, y = ~numerator, color = ~age, type = "bar", colors = viridis::viridis(5), 
+#                text = ~paste0("Percent: ", round(count,1), "%; Count: ", numerator), hoverinfo = 'x+text')) %>%
+#   subplot(nrows = 2, shareX = TRUE, shareY = TRUE) %>%
+#   layout(xaxis = list(title = ""),
+#          xaxis2 = list(title = ""),
+#          xaxis3 = list(title = ""),
+#          yaxis = list(title = "# ED Visits"),
+#          yaxis2 = list(title = "# ED Visits"),
+#          title = "")
+
+```
+
+***
+
+### Percent ED Visits for CRI by Race-Ethnicity
+
+```{r ed_race}
+
+cold_race_api <- "https://essence.syndromicsurveillance.org/nssp_essence/api/tableBuilder/?endDate=24Jun2022&geography=il_cook&percentParam=ccddCategory&datasource=va_er&startDate=26Mar2022&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TableBuilder&ccddCategory=cold%20related%20illness%20v1&geographySystem=region&detector=probrepswitch&timeResolution=daily&hasBeenE=1&rowFields=cRaceEthBroad&columnField=timeResolution" %>%
+  essence_change_api_date(start = essence_api_date(Sys.Date() - 60), end = essence_api_date(Sys.Date()))
+
+cold_race <- nssp_get_table(cold_race_api) %>%
+  mutate(new_race = case_when(grepl("Latino", cRaceEthBroad) ~ "Hispanic/Latino",
+                              grepl("Black", cRaceEthBroad) ~ "Non-Hispanic Black",
+                              grepl("White", cRaceEthBroad) ~ "Non-Hispanic White",
+                              grepl("Asian", cRaceEthBroad) ~ "Non-Hispanic Asian",
+                              TRUE ~ "Other/Unknown")) %>%
+  group_by(timeResolution, new_race) %>%
+  summarize(new_num = sum(numerator),
+            new_denom = sum(denominator),
+            percent = round(new_num / new_denom * 100, digits = 2)) %>%
+  ungroup()
+
+cold_race %>%
+  filter(new_race != "Other/Unknown") %>%
+  mutate(new_race = factor(new_race)) %>%
+  group_by(new_race) %>%
+  do(p=plot_ly(., x = ~timeResolution, y = ~percent, color = ~new_race, type = "bar", colors = viridis::viridis(5),
+     text = ~paste0("Percent: ", percent, "%; Count: ", new_num), hoverinfo = 'x+text')) %>%
+  subplot(nrows = 2, shareX = TRUE, shareY = TRUE) %>%
+  layout(xaxis = list(title = ""),
+         xaxis2 = list(title = ""),
+         xaxis3 = list(title = ""),
+         yaxis = list(title = "% ED Visits"),
+         yaxis2 = list(title = "% ED Visits"),
+         title = "")
+
+```
+
+***
+
+### Percent ED Visits for CRI by District
+
+```{r ed_district}
+
+cold_zip_api <- "https://essence.syndromicsurveillance.org/nssp_essence/api/tableBuilder?endDate=24Jun2022&geography=60004,60005,60007,60008,60010,60016,60018,60022,60025,60026,60029,60043,60053,60056,60062,60067,60068,60070,60074,60090,60091,60093,60107,60120,60169,60173,60192,60193,60194,60195,60712,60714,60006,60009,60017,60019,60038,60055,60065,60078,60082,60094,60095,60159,60168,60179,60196,60011,60409,60411,60419,60422,60425,60426,60428,60429,60430,60438,60443,60445,60452,60461,60469,60471,60472,60473,60475,60476,60477,60478,60487,60827,60412,60406,60415,60439,60453,60455,60456,60457,60458,60462,60463,60464,60465,60467,60480,60482,60501,60803,60805,60454,60499,60104,60130,60131,60141,60153,60154,60155,60160,60162,60163,60164,60165,60171,60176,60305,60402,60513,60525,60526,60534,60546,60558,60706,60707,60804,60161&percentParam=ccddCategory&datasource=va_er&startDate=26Mar2022&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TableBuilder&ccddCategory=cold%20related%20illness%20v1&geographySystem=zipcode&detector=probrepswitch&timeResolution=daily&hasBeenE=1&rowFields=timeResolution&columnField=geographyzipcode" %>%
+  essence_change_api_date(start = essence_api_date(Sys.Date() - 60), end = essence_api_date(Sys.Date()))
+
+cold_district <- nssp_get_table(cold_zip_api) %>%
+  left_join(select(zips_by_district, zip_code, district), by = c("geographyzipcode" = "zip_code")) %>%
+  group_by(timeResolution, district) %>%
+  summarize(new_num = sum(numerator),
+            new_denom = sum(denominator),
+            percent = round(new_num / new_denom * 100, digits = 2)) %>%
+  ungroup()
+
+cold_district %>%
+  mutate(district = factor(district, ordered = T, levels = c("North", "West", "Southwest", "South"))) %>%
+  group_by(district) %>%
+  do(p=plot_ly(., x = ~timeResolution, y = ~percent, color = ~district, type = "bar",
+     text = ~paste0("Percent: ", percent, "%; Count: ", new_num), hoverinfo = 'x+text')) %>%
+  subplot(nrows = 2, shareX = TRUE, shareY = TRUE) %>%
+  layout(xaxis = list(title = ""),
+         xaxis2 = list(title = ""),
+         yaxis = list(title = "% ED Visits"),
+         yaxis2 = list(title = "% ED Visits"),
+         title = "")
+
+```
+
+***
+
+### Percent ED Visits for CRI by Winter Season
+
+```{r historical}
+
+cold_yrs_api <- "https://essence.syndromicsurveillance.org/nssp_essence/api/tableBuilder?endDate=24Jun2022&geography=il_cook&percentParam=ccddCategory&datasource=va_er&startDate=26Mar2022&medicalGroupingSystem=essencesyndromes&userId=660&site=890&aqtTarget=TableBuilder&ccddCategory=cold%20related%20illness%20v1&geographySystem=region&detector=probrepswitch&timeResolution=daily&hasBeenE=1&rowFields=geographyregion&columnField=timeResolution" %>%
+  essence_change_api_date(start = essence_api_date(as.Date("2018-10-01")), end = essence_api_date(Sys.Date()))
+
+cold_yrs <- nssp_get_table(cold_yrs_api) %>%
+  mutate(timeResolution = as_date(timeResolution),
+         month = month(timeResolution)) %>%
+  filter(month %in% c(11, 12, 1, 2)) %>%
+  mutate(winter = case_when(month %in% c(11, 12) ~ 
+                              paste0(year(timeResolution), "-", as.numeric(substr(year(timeResolution),3,4)) + 1),
+                            TRUE ~ 
+                              paste0(year(timeResolution) - 1, "-", substr(year(timeResolution),3,4))),
+         dummy_date = case_when(month %in% c(11,12) ~
+                                  as_date(paste(2021, month, day(timeResolution), sep = "-")),
+                                TRUE ~ 
+                                  as_date(paste(2022, month, day(timeResolution), sep = "-")))
+  )
+
+# plot_ly(data = cold_yrs, x = ~dummy_date, y = ~count, type = "scatter", mode = "lines", color = ~winter, colors = viridis::viridis(5),
+#         text = ~paste0("Percent: ", round(count,1), "%; Count: ", numerator), hoverinfo = 'x+text') %>%
+#   layout(xaxis = list(tickformat = "%b %d", showgrid = F, title = ""),
+#          yaxis = list(title = "%ED Visits for CRI", showgrid = F)
+#          )
+
+cold_yrs %>%
+  mutate(winter = factor(winter),
+         winter = fct_rev(winter)) %>%
+  group_by(winter) %>%
+  do(p=plot_ly(., x = ~dummy_date, y = ~count, color = ~winter, type = "bar", colors = viridis::viridis(5),
+     text = ~paste0("Percent: ", count, "%; Count: ", numerator), hoverinfo = 'x+text')) %>%
+  subplot(nrows = 3, shareX = TRUE, shareY = TRUE) %>%
+  layout(xaxis = list(title = "", tickformat = "%b %d"),
+         xaxis2 = list(title = "", tickformat = "%b %d"),
+         yaxis = list(title = "% ED Visits", range = c(0,2)),
+         yaxis2 = list(title = "% ED Visits", range = c(0,2)),
+         yaxis3 = list(title = "% ED Visits", range = c(0,2)),
+         title = "")
+
+
+
+
+```
+
