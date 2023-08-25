@@ -186,3 +186,7 @@ heat_district %>%
          title = "")
 
 ```
+
+```{r knit}
+#rmarkdown::render("heat-related-illness-report.RMD",output_file=paste0('HRI ',Sys.Date(),'.html'))
+```
